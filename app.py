@@ -12,18 +12,21 @@ from flask_jwt_extended import (
     JWTManager, create_access_token, jwt_required, get_jwt_identity
 )
 from transformers import pipeline
-
 from flask_cors import CORS
 
 app = Flask(__name__)
-
-# Allow CORS requests from any origin
 CORS(app)
 
-
-# Configure MySQL connection (update the user and host as needed)
+# PostgreSQL connection via environment variables
+db_user = os.environ.get('DB_USER')
 db_password = os.environ.get('DB_PASSWORD')
-app.config['SQLALCHEMY_DATABASE_URI'] = f'mysql+mysqlconnector://root:{db_password}@localhost/sentiment_analysis_db'
+db_host = os.environ.get('DB_HOST')
+db_port = os.environ.get('DB_PORT', '5432')  # default PostgreSQL port
+db_name = os.environ.get('DB_NAME')
+
+app.config['SQLALCHEMY_DATABASE_URI'] = (
+    f'postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
+)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Configure JWT
@@ -34,7 +37,7 @@ db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
 
-# Define the User model
+# User model
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(150), nullable=False)
@@ -48,7 +51,7 @@ class User(db.Model):
     def check_password(self, password):
         return bcrypt.check_password_hash(self.password_hash, password)
 
-# Define the Analysis model
+# Analysis model
 class Analysis(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     text = db.Column(db.Text, nullable=False)
@@ -57,15 +60,16 @@ class Analysis(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
-# Create database tables before the first request
+# Create tables
 @app.before_first_request
 def create_tables():
     db.create_all()
 
-# Initialize Hugging Face sentiment analysis pipeline
+# Hugging Face sentiment analyzer
 sentiment_analyzer = pipeline("sentiment-analysis")
 
-# Registration endpoint
+# Routes
+
 @app.route('/register', methods=['POST'])
 def register():
     data = request.get_json()
@@ -79,7 +83,6 @@ def register():
     if not name or not email or not password:
         return jsonify({"error": "Missing required fields"}), 400
     
-    # Check if the user already exists
     if User.query.filter_by(email=email).first():
         return jsonify({"error": "User already exists"}), 400
     
@@ -91,7 +94,6 @@ def register():
     
     return jsonify({"message": "User registered successfully"}), 201
 
-# Login endpoint
 @app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -112,7 +114,6 @@ def login():
     else:
         return jsonify({"error": "Invalid credentials"}), 401
 
-# Analyze endpoint (protected)
 @app.route('/analyze', methods=['POST'])
 @jwt_required()
 def analyze():
@@ -123,12 +124,10 @@ def analyze():
         return jsonify({"error": "No text provided"}), 400
     
     text = data['text']
-    # Run sentiment analysis using Hugging Face transformers
     result = sentiment_analyzer(text)[0]
     label = result['label']
     score = result['score']
     
-    # Save the analysis result associated with the current user
     analysis = Analysis(text=text, sentiment=label, confidence=score, user_id=user_id)
     db.session.add(analysis)
     db.session.commit()
@@ -139,7 +138,6 @@ def analyze():
         "confidence": score
     })
 
-# History endpoint (protected)
 @app.route('/history', methods=['GET'])
 @jwt_required()
 def history():
