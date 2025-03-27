@@ -38,3 +38,4 @@ typing_extensions==4.13.0
 urllib3==2.3.0
 Werkzeug==2.1.2
 gunicorn
+psycopg2-binary
